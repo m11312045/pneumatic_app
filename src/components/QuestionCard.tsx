@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Question, Answer, COMPONENT_NAMES } from "../types";
-import { Camera, Upload, Send, Loader2 } from "lucide-react";
+import { Upload, Send, Loader2 } from "lucide-react";
 import { detectComponent } from "../utils/yolo";
 import { uploadAnswerImage, updateAttemptItem } from "../lib/api";
 
@@ -32,63 +32,14 @@ export function QuestionCard({
 }: QuestionCardProps) {
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [showCamera, setShowCamera] = useState(false);
-
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
 
-  // 離開元件時確保關掉相機
+  // ✅ 2) 換題時清除作答區（seq / question.id 變更就清）
   useEffect(() => {
-    return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
-      }
-    };
-  }, []);
-
-  const startCamera = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment", width: 1280, height: 720 },
-      });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        streamRef.current = stream;
-      }
-      setShowCamera(true);
-    } catch (error) {
-      console.error("無法啟動相機:", error);
-      alert("無法啟動相機，請確認已授予相機權限");
-    }
-  };
-
-  const stopCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-    setShowCamera(false);
-  };
-
-  const capturePhoto = () => {
-    if (!videoRef.current || !canvasRef.current) return;
-
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    ctx.drawImage(video, 0, 0);
-
-    const imageData = canvas.toDataURL("image/jpeg", 0.9);
-    setCapturedImage(imageData);
-    stopCamera();
-  };
+    setCapturedImage(null);
+    setIsProcessing(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, [seq, question.id]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -112,28 +63,26 @@ export function QuestionCard({
         type: blob.type || "image/jpeg",
       });
 
-      // 2) 先上傳到 Supabase Storage（pneumatic-answers bucket）
-      //    ⚠️ 建議你把 uploadAnswerImage 改成吃 File，而不是 base64
+      // 2) 上傳到 Supabase Storage
       const imageUrl = await uploadAnswerImage(attemptId, seq, file);
-
       if (!imageUrl) throw new Error("圖片上傳失敗");
 
-      // 3) 呼叫 YOLO（也用 file）
+      // 3) YOLO 偵測
       const result = await detectComponent(file);
 
       const detected = result.detectedLabels ?? [];
       const expected = question.expected_labels ?? [];
 
-      // 4) 判斷是否正確：期望類別「全部」都要出現才算對
+      // 4) 判斷正確（期望類別全部要出現）
       const isCorrect =
         expected.length > 0 && expected.every((label) => detected.includes(label));
 
-      // 5) 分數：每題 5 分（20題總分100）
+      // 5) 分數（每題 5 分）
       const score = isCorrect ? 5 : 0;
 
       const answer: Answer = {
         questionId: question.id,
-        imageData: capturedImage, // 前端仍可用 base64 顯示預覽
+        imageData: capturedImage,
         detectedLabels: detected,
         yoloResult: result.rawResult,
         isCorrect,
@@ -179,11 +128,11 @@ export function QuestionCard({
         {question.question_type === "COPY" && question.prompt_image_url && (
           <div className="mt-4 p-4 bg-gray-50 rounded-lg border-2 border-gray-200">
             <p className="text-gray-600 mb-2">範例符號：</p>
-            <div className="flex items-center justify-center bg-white rounded border-2 border-dashed border-gray-300">
+            <div className="flex items-center justify-center bg-white rounded border-2 border-dashed border-gray-300 p-2">
               <img
                 src={question.prompt_image_url}
                 alt="範例符號"
-                className="max-h-48 object-contain"
+                className="max-h-48 w-auto object-contain"
               />
             </div>
           </div>
@@ -204,60 +153,27 @@ export function QuestionCard({
       </div>
 
       {!capturedImage ? (
-        <div className="space-y-4">
-          {showCamera ? (
-            <div className="space-y-4">
-              <video ref={videoRef} autoPlay playsInline className="w-full rounded-lg bg-black" />
-              <div className="flex gap-3">
-                <button
-                  onClick={capturePhoto}
-                  className="flex-1 bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
-                >
-                  <Camera className="w-5 h-5" />
-                  拍攝照片
-                </button>
-                <button
-                  onClick={stopCamera}
-                  className="px-6 bg-gray-500 text-white py-3 rounded-lg hover:bg-gray-600 transition-colors"
-                >
-                  取消
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <button
-                onClick={startCamera}
-                className="w-full bg-indigo-600 text-white py-4 rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
-              >
-                <Camera className="w-5 h-5" />
-                開啟相機拍攝
-              </button>
+        <div className="space-y-3">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="w-full bg-gray-600 text-white py-4 rounded-lg hover:bg-gray-700 transition-colors flex items-center justify-center gap-2"
+          >
+            <Upload className="w-5 h-5" />
+            上傳圖片
+          </button>
 
-              <div className="relative">
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full bg-gray-600 text-white py-4 rounded-lg hover:bg-gray-700 transition-colors flex items-center justify-center gap-2"
-                >
-                  <Upload className="w-5 h-5" />
-                  上傳圖片
-                </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
-              </div>
-            </div>
-          )}
-          <canvas ref={canvasRef} className="hidden" />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleFileUpload}
+            className="hidden"
+          />
         </div>
       ) : (
         <div className="space-y-4">
           <div className="rounded-lg overflow-hidden border-2 border-gray-200">
-            <img src={capturedImage} alt="拍攝的圖片" className="w-full" />
+            <img src={capturedImage} alt="作答圖片" className="w-full" />
           </div>
           <div className="flex gap-3">
             <button
@@ -282,7 +198,7 @@ export function QuestionCard({
               disabled={isProcessing}
               className="px-6 bg-gray-500 text-white py-3 rounded-lg hover:bg-gray-600 transition-colors disabled:bg-gray-400"
             >
-              重拍
+              重選
             </button>
           </div>
         </div>

@@ -39,6 +39,7 @@ function mapClassToComponentType(className: string): string {
     "one-way flow control valve": "One-way flow control valve",
     "shuttle valve": "Shuttle valve",
     "two-pressure valve": "Two-pressure valve",
+    "two pressure valve": "Two-pressure valve",
   };
   return classMap[normalized] ?? className;
 }

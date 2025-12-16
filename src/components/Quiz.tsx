@@ -23,18 +23,29 @@ export function Quiz({ user }: QuizProps) {
 
   const startNewQuiz = async () => {
     setIsLoading(true);
-    
-    // 獲取所有題目
+
     const allQuestions = await getQuestions();
-    
+
     if (allQuestions.length === 0) {
-      alert('題庫為空，請先新增題目');
+      alert("題庫為空，請先新增題目");
       setIsLoading(false);
       return;
     }
 
-    // 隨機選擇題目
-    const selectedQuestions = getRandomQuestions(allQuestions, 10, 10);
+    // ✅ 20題：COPY 8 + TEXT 12
+    const selectedQuestions = getRandomQuestions(allQuestions, 20, 8);
+
+    // ✅ 若題庫不足 20，直接提示你缺什麼（不會默默變10）
+    if (selectedQuestions.length < 20) {
+      const copyCount = allQuestions.filter(q => q.question_type === "COPY").length;
+      const textCount = allQuestions.filter(q => q.question_type === "TEXT").length;
+      alert(
+        `題庫數量不足以組成20題（COPY 8 + TEXT 12）\n` +
+        `目前題庫：COPY=${copyCount}, TEXT=${textCount}, total=${allQuestions.length}\n` +
+        `這次只抽到：${selectedQuestions.length} 題`
+      );
+    }
+
     setQuestions(selectedQuestions);
     setCurrentIndex(0);
     setAnswers([]);

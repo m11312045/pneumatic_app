@@ -65,6 +65,7 @@ export async function getQuestions(): Promise<Question[]> {
       expected_counts: q.expected_counts as Record<string, number> | undefined,
       difficulty: q.difficulty,
       is_active: q.is_active,
+      answer_image_url: q.answer_image_url || undefined,
     }));
   } catch (error) {
     console.error('獲取題目錯誤:', error);
@@ -75,29 +76,38 @@ export async function getQuestions(): Promise<Question[]> {
 // 隨機選擇題目
 export function getRandomQuestions(
   allQuestions: Question[],
-  copyCount: number = 10,
-  textCount: number = 10
+  totalCount: number = 20,
+  copyCount: number = 8
 ): Question[] {
-  const copyQuestions = allQuestions.filter((q) => q.question_type === 'COPY');
-  const textQuestions = allQuestions.filter((q) => q.question_type === 'TEXT');
+  const copyQuestions = allQuestions.filter((q) => q.question_type === "COPY");
+  const textQuestions = allQuestions.filter((q) => q.question_type === "TEXT");
 
-  const shuffledCopy = [...copyQuestions].sort(() => Math.random() - 0.5);
-  const shuffledText = [...textQuestions].sort(() => Math.random() - 0.5);
+  const actualCopyCount = Math.min(copyCount, copyQuestions.length);
+  const textCount = Math.max(0, totalCount - actualCopyCount);
 
-  return [
-    ...shuffledCopy.slice(0, copyCount),
-    ...shuffledText.slice(0, textCount),
-  ];
+  const pickedCopy = [...copyQuestions].sort(() => Math.random() - 0.5).slice(0, actualCopyCount);
+  const pickedText = [...textQuestions].sort(() => Math.random() - 0.5).slice(0, textCount);
+
+  const picked = [...pickedCopy, ...pickedText].sort(() => Math.random() - 0.5); // ✅ 再洗一次
+
+  if (picked.length < totalCount) {
+    console.warn(
+      `[QuestionPick] want=${totalCount}, got=${picked.length}, COPY=${copyQuestions.length}, TEXT=${textQuestions.length}`
+    );
+  }
+
+  return picked;
 }
 
 // 建立新的測驗
 export async function createAttempt(
-  studentUuid: string, // ✅ 明確：students.id
+  studentUuid: string,
   questions: Question[],
-  copyCount: number = 10,
-  textCount: number = 10
 ): Promise<string | null> {
   try {
+    const copyCount = questions.filter(q => q.question_type === "COPY").length;
+    const textCount = questions.filter(q => q.question_type === "TEXT").length;
+
     const { data: attempt, error: attemptError } = await supabase
       .from("attempts")
       .insert({
@@ -115,6 +125,9 @@ export async function createAttempt(
       attempt_id: attempt.id,
       question_id: q.id,
       seq: index + 1,
+      // ✅ 這些欄位若 DB 沒預設，保險給值
+      detected_labels: [],
+      score: 0,
     }));
 
     const { error: itemsError } = await supabase.from("attempt_items").insert(items);
@@ -140,7 +153,8 @@ export async function uploadAnswerImage(
     .from("pneumatic-answers")
     .upload(filePath, file, {
       contentType: file.type || "image/jpeg",
-      upsert: true, // ✅ 允許重拍覆蓋
+      upsert: true,
+      cacheControl: "0", // ✅ 避免重拍後拿到舊快取
     });
 
   if (error) {
@@ -152,7 +166,8 @@ export async function uploadAnswerImage(
     .from("pneumatic-answers")
     .getPublicUrl(filePath);
 
-  return urlData.publicUrl;
+  // ✅ 強制 bust cache（保險）
+  return `${urlData.publicUrl}?t=${Date.now()}`;
 }
 
 

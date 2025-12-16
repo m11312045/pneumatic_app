@@ -17,6 +17,7 @@ export interface Question {
   expected_counts?: Record<string, number>;
   difficulty: number;
   is_active: boolean;
+  answer_image_url?: string;
 }
 
 export type ComponentType =
