@@ -1,3 +1,4 @@
+// src/components/Results.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Question, Answer, COMPONENT_NAMES } from "../types";
 import { CheckCircle, XCircle, RotateCcw, TrendingUp, Loader2 } from "lucide-react";
@@ -10,13 +11,26 @@ interface ResultsProps {
   onRestart: () => void;
 }
 
+function formatLogicEquation(raw?: string): string[] {
+  if (!raw) return [];
+  const s = raw.replaceAll("。", ";").replaceAll("\n", ";");
+  return s
+    .split(";")
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .map((line) =>
+      line
+        .replace(/\s*=\s*/g, " = ")
+        .replace(/\s*\*\s*/g, " * ")
+        .replace(/\s*\+\s*/g, " + ")
+    );
+}
+
 export function Results({ attemptId, questions, answers, onRestart }: ResultsProps) {
   const [isSubmitting, setIsSubmitting] = useState(true);
 
-  // ✅ 避免 React 18 StrictMode（開發模式）造成 useEffect 執行兩次 → 重複提交
   const submittedRef = useRef(false);
 
-  // ✅ 用 questionId 對應答案，避免順序不同造成對錯題
   const answerMap = useMemo(() => new Map(answers.map((a) => [a.questionId, a])), [answers]);
 
   const totalScore = useMemo(
@@ -24,22 +38,14 @@ export function Results({ attemptId, questions, answers, onRestart }: ResultsPro
     [answers]
   );
 
-  const correctCount = useMemo(
-    () => answers.filter((a) => a.isCorrect).length,
-    [answers]
-  );
+  const correctCount = useMemo(() => answers.filter((a) => a.isCorrect).length, [answers]);
 
   const percentage = Math.round(totalScore);
   const progress = Math.max(0, Math.min(100, percentage));
 
   useEffect(() => {
-    // ✅ 防呆：沒 attemptId 不送
     if (!attemptId) return;
-
-    // ✅ 防呆：答案還沒齊就先不要提交（避免 0 分）
     if (questions.length > 0 && answers.length < questions.length) return;
-
-    // ✅ 只提交一次
     if (submittedRef.current) return;
     submittedRef.current = true;
 
@@ -104,12 +110,17 @@ export function Results({ attemptId, questions, answers, onRestart }: ResultsPro
           {questions.map((question, index) => {
             const answer = answerMap.get(question.id);
             const isCorrect = answer?.isCorrect ?? false;
+            const isAdvanced = question.question_type === "ADVANCED";
 
-            // ✅ COPY 用 prompt_image_url；TEXT 用 answer_image_url（你要的「文字題範例圖解答」）
+            // 基本題範例圖：COPY 用 prompt_image_url；TEXT 用 answer_image_url
             const exampleUrl =
               question.question_type === "COPY"
                 ? question.prompt_image_url
-                : question.answer_image_url;
+                : question.question_type === "TEXT"
+                ? question.answer_image_url
+                : null;
+
+            const ai = answer?.aiResult as any;
 
             return (
               <div
@@ -132,21 +143,18 @@ export function Results({ attemptId, questions, answers, onRestart }: ResultsPro
                       <div>
                         <span className="text-gray-900">第 {index + 1} 題</span>
                         <span className="ml-2 px-2 py-1 bg-white rounded text-gray-700">
-                          {question.question_type === "COPY" ? "照圖抄繪" : "文字描述"}
+                          {question.question_type === "COPY"
+                            ? "照圖抄繪"
+                            : question.question_type === "TEXT"
+                            ? "文字描述 + 畫符號"
+                            : "進階迴路設計"}
                         </span>
                       </div>
-
-                      {/* ✅ confidence=0 也顯示 */}
-                      {answer && typeof answer.confidence === "number" && (
-                        <span className="text-gray-600">
-                          信心度：{Math.round(answer.confidence * 100)}%
-                        </span>
-                      )}
                     </div>
 
                     {question.title && <h4 className="text-gray-800 mb-2">{question.title}</h4>}
                     {question.prompt_text && (
-                      <p className="text-gray-700 mb-3">{question.prompt_text}</p>
+                      <p className="text-gray-700 mb-3 whitespace-pre-line">{question.prompt_text}</p>
                     )}
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
@@ -157,7 +165,7 @@ export function Results({ attemptId, questions, answers, onRestart }: ResultsPro
                           </p>
                           <img
                             src={exampleUrl}
-                            alt="正解範例"
+                            alt="範例/正解"
                             className="rounded border-2 border-gray-300 w-full"
                           />
                         </div>
@@ -175,33 +183,69 @@ export function Results({ attemptId, questions, answers, onRestart }: ResultsPro
                       )}
                     </div>
 
-                    <div className="p-4 bg-white rounded-lg border border-gray-200">
-                      <p className="text-gray-700 mb-2">
-                        <strong>正確答案：</strong>
-                        {(question.expected_labels ?? [])
-                          .map((label) => COMPONENT_NAMES[label as keyof typeof COMPONENT_NAMES] || label)
-                          .join("、")}
-                      </p>
+                    {/* ✅ 分流顯示 */}
+                    {isAdvanced ? (
+                      <div className="p-4 bg-white rounded-lg border border-gray-200 space-y-3">
+                        <div className="text-gray-800">
+                          <strong>題幹：</strong>{ai?.isCorrect ? "正確" : "不正確"}　
+                          <strong className="ml-4">加分：</strong>{ai?.bonusCorrect ? "達成" : "未達成"}
+                        </div>
 
-                      {answer?.detectedLabels && answer.detectedLabels.length > 0 && (
+                        <div>
+                          <div className="text-gray-800 font-semibold mb-1">邏輯式（格式化）</div>
+                          <pre className="bg-gray-100 p-3 rounded text-sm font-mono overflow-auto">
+{formatLogicEquation(ai?.logicEquation).join("\n") || "—"}
+                          </pre>
+                        </div>
+
+                        <div className="text-gray-800">
+                          <strong>改進（20字內）：</strong>{ai?.advice || "—"}
+                        </div>
+
+                        {/* 進階題如果你有放最佳答案在 explanation，也可顯示 */}
+                        {question.explanation ? (
+                          <details className="bg-gray-50 p-3 rounded border">
+                            <summary className="cursor-pointer text-gray-700 font-medium">
+                              顯示參考最佳答案（老師）
+                            </summary>
+                            <div className="mt-2 whitespace-pre-line text-gray-800">{question.explanation}</div>
+                          </details>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="p-4 bg-white rounded-lg border border-gray-200">
                         <p className="text-gray-700 mb-2">
-                          <strong>您的答案：</strong>
-                          {answer.detectedLabels
-                            .map((label) => COMPONENT_NAMES[label as keyof typeof COMPONENT_NAMES] || label)
+                          <strong>正確答案：</strong>
+                          {(question.expected_labels ?? [])
+                            .map(
+                              (label) =>
+                                COMPONENT_NAMES[label as keyof typeof COMPONENT_NAMES] || label
+                            )
                             .join("、")}
                         </p>
-                      )}
 
-                      {/* 你原本是「答錯才顯示解析」；如果你想答對也顯示解析，把 !isCorrect 拿掉 */}
-                      {!isCorrect && question.explanation && (
-                        <div className="mt-3 pt-3 border-t border-gray-200">
-                          <p className="text-red-700">
-                            <strong>解析：</strong>
-                            {question.explanation}
+                        {answer?.detectedLabels && answer.detectedLabels.length > 0 && (
+                          <p className="text-gray-700 mb-2">
+                            <strong>您的答案：</strong>
+                            {answer.detectedLabels
+                              .map(
+                                (label) =>
+                                  COMPONENT_NAMES[label as keyof typeof COMPONENT_NAMES] || label
+                              )
+                              .join("、")}
                           </p>
-                        </div>
-                      )}
-                    </div>
+                        )}
+
+                        {!isCorrect && question.explanation && (
+                          <div className="mt-3 pt-3 border-t border-gray-200">
+                            <p className="text-red-700">
+                              <strong>解析：</strong>
+                              {question.explanation}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

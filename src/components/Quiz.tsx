@@ -33,15 +33,16 @@ export function Quiz({ user }: QuizProps) {
     }
 
     // ✅ 20題：COPY 8 + TEXT 12
-    const selectedQuestions = getRandomQuestions(allQuestions, 20, 8);
+    const selectedQuestions = getRandomQuestions(allQuestions, 20);
 
     // ✅ 若題庫不足 20，直接提示你缺什麼（不會默默變10）
     if (selectedQuestions.length < 20) {
-      const copyCount = allQuestions.filter(q => q.question_type === "COPY").length;
-      const textCount = allQuestions.filter(q => q.question_type === "TEXT").length;
+      const basicCount = allQuestions.filter(q => q.question_type === "COPY" || q.question_type === "TEXT").length;
+      const advCount = allQuestions.filter(q => q.question_type === "ADVANCED").length;
+
       alert(
-        `題庫數量不足以組成20題（COPY 8 + TEXT 12）\n` +
-        `目前題庫：COPY=${copyCount}, TEXT=${textCount}, total=${allQuestions.length}\n` +
+        `題庫數量不足以組成20題（基本10 + 進階10）\n` +
+        `目前題庫：基本=${basicCount}, 進階=${advCount}, total=${allQuestions.length}\n` +
         `這次只抽到：${selectedQuestions.length} 題`
       );
     }

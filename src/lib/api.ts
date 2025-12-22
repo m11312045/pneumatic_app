@@ -76,27 +76,23 @@ export async function getQuestions(): Promise<Question[]> {
 // 隨機選擇題目
 export function getRandomQuestions(
   allQuestions: Question[],
-  totalCount: number = 20,
-  copyCount: number = 8
+  totalCount: number = 20
+  // copyCount 參數可能不再需要嚴格限制，這裡改寫邏輯
 ): Question[] {
-  const copyQuestions = allQuestions.filter((q) => q.question_type === "COPY");
-  const textQuestions = allQuestions.filter((q) => q.question_type === "TEXT");
+  // 分類
+  const basicQuestions = allQuestions.filter(q => q.question_type === 'COPY' || q.question_type === 'TEXT');
+  const advancedQuestions = allQuestions.filter(q => q.question_type === 'ADVANCED');
 
-  const actualCopyCount = Math.min(copyCount, copyQuestions.length);
-  const textCount = Math.max(0, totalCount - actualCopyCount);
+  // 1. 抽取 10 題基本題
+  const pickedBasic = [...basicQuestions].sort(() => Math.random() - 0.5).slice(0, 10);
+  
+  // 2. 抽取 10 題進階題
+  const pickedAdvanced = [...advancedQuestions].sort(() => Math.random() - 0.5).slice(0, 10);
 
-  const pickedCopy = [...copyQuestions].sort(() => Math.random() - 0.5).slice(0, actualCopyCount);
-  const pickedText = [...textQuestions].sort(() => Math.random() - 0.5).slice(0, textCount);
+  // 合併並打亂
+  const finalQuestions = [...pickedBasic, ...pickedAdvanced].sort(() => Math.random() - 0.5);
 
-  const picked = [...pickedCopy, ...pickedText].sort(() => Math.random() - 0.5); // ✅ 再洗一次
-
-  if (picked.length < totalCount) {
-    console.warn(
-      `[QuestionPick] want=${totalCount}, got=${picked.length}, COPY=${copyQuestions.length}, TEXT=${textQuestions.length}`
-    );
-  }
-
-  return picked;
+  return finalQuestions;
 }
 
 // 建立新的測驗
@@ -107,6 +103,7 @@ export async function createAttempt(
   try {
     const copyCount = questions.filter(q => q.question_type === "COPY").length;
     const textCount = questions.filter(q => q.question_type === "TEXT").length;
+    const advancedCount = questions.filter(q => q.question_type === "ADVANCED").length;
 
     const { data: attempt, error: attemptError } = await supabase
       .from("attempts")
@@ -115,6 +112,7 @@ export async function createAttempt(
         status: "IN_PROGRESS",
         copy_count: copyCount,
         text_count: textCount,
+        advanced_count: advancedCount,
       })
       .select()
       .single();
@@ -177,12 +175,14 @@ export async function updateAttemptItem(
   seq: number,
   data: {
     answer_image_url: string;
-    yolo_result: any;
     detected_labels: string[];
     match_pass: boolean;
     score: number;
     feedback?: string;
-    yolo_model_id?: string;
+
+    ai_provider?: 'GEMINI';
+    ai_model?: string;
+    ai_result?: any;
   }
 ): Promise<boolean> {
   try {
@@ -190,7 +190,6 @@ export async function updateAttemptItem(
       .from("attempt_items")
       .update({
         ...data,
-        yolo_model_id: data.yolo_model_id ?? "5E3pSobX578NWpW0bSig",
         answered_at: new Date().toISOString(),
       })
       .eq("attempt_id", attemptId)
@@ -302,7 +301,7 @@ export async function getAttemptDetails(attemptId: string): Promise<AttemptWithD
         },
         seq: item.seq,
         answer_image_url: item.answer_image_url,
-        yolo_result: item.yolo_result,
+        ai_result: item.geminiResult,
         detected_labels: item.detected_labels,
         match_pass: item.match_pass,
         score: item.score,

@@ -4,7 +4,7 @@ export interface User {
   name: string;
 }
 
-export type QuestionType = 'COPY' | 'TEXT';
+export type QuestionType = 'COPY' | 'TEXT' | 'ADVANCED';
 
 export interface Question {
   id: string;
@@ -13,7 +13,7 @@ export interface Question {
   prompt_text?: string;
   prompt_image_url?: string;
   explanation?: string;
-  expected_labels: string[];
+  expected_labels?: string[];
   expected_counts?: Record<string, number>;
   difficulty: number;
   is_active: boolean;
@@ -30,13 +30,21 @@ export type ComponentType =
   | 'Shuttle valve'
   | 'Two-pressure valve';
 
+export interface GeminiAnalysisResult {
+  isCorrect: boolean;           // 題幹正確性
+  bonusCorrect?: boolean;       // 加分題正確性 (進階題用)
+  logicEquation?: string;       // 邏輯式 (進階題用)
+  advice?: string;              // 改進之道 (20字內)
+  detectedComponents?: string[]; // 偵測到的元件 (基本題用)
+}
+
+// 更新 Answer 介面
 export interface Answer {
   questionId: string;
   imageData: string;
-  detectedLabels: string[];
-  yoloResult: any;
+  detectedLabels?: string[];
+  aiResult?: GeminiAnalysisResult; // 統一用這個欄位接 AI 結果
   isCorrect: boolean;
-  confidence?: number;
   score: number;
 }
 
@@ -48,6 +56,7 @@ export interface AttemptWithDetails {
   status: 'IN_PROGRESS' | 'SUBMITTED';
   copy_count: number;
   text_count: number;
+  advanced_count: number;
   total_score: number;
   started_at: string;
   submitted_at: string | null;
@@ -62,12 +71,16 @@ export interface AttemptItem {
   question?: Question;
   seq: number;
   answer_image_url: string | null;
-  yolo_result: any;
+
   detected_labels: string[];
   match_pass: boolean | null;
   score: number;
   feedback: string | null;
   answered_at: string | null;
+
+  ai_provider: string;   // default 'GEMINI'
+  ai_model?: string | null;
+  ai_result?: any;       // GeminiAnalysisResult
 }
 
 export const COMPONENT_NAMES: Record<ComponentType, string> = {

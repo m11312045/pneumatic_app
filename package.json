@@ -1,6 +1,6 @@
 
   {
-      "name": "氣壓圖繪製App",
+      "name": "pneumatic_app",
       "version": "0.1.0",
       "private": true,
       "dependencies": {
@@ -46,7 +46,8 @@
           "recharts": "^2.15.2",
           "sonner": "^2.0.3",
           "tailwind-merge": "*",
-          "vaul": "^1.1.2"
+          "vaul": "^1.1.2",
+          "@google/generative-ai": "^0.24.1"
       },
       "devDependencies": {
           "@types/node": "^20.10.0",

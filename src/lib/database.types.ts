@@ -124,13 +124,14 @@ export interface Database {
           question_id: string
           seq: number
           answer_image_url: string | null
-          yolo_model_id: string | null
-          yolo_result: Json | null
-          detected_labels: string[]
+          detected_labels: string[] | null
           match_pass: boolean | null
           score: number
           feedback: string | null
           answered_at: string | null
+          ai_provider: string
+          ai_model: string | null
+          ai_result: Json | null
           created_at: string
           updated_at: string
         }
@@ -140,13 +141,14 @@ export interface Database {
           question_id: string
           seq: number
           answer_image_url?: string | null
-          yolo_model_id?: string | null
-          yolo_result?: Json | null
-          detected_labels?: string[]
+          detected_labels?: string[] | null
           match_pass?: boolean | null
           score?: number
           feedback?: string | null
           answered_at?: string | null
+          ai_provider?: string
+          ai_model?: string | null
+          ai_result?: Json | null
           created_at?: string
           updated_at?: string
         }
@@ -156,13 +158,14 @@ export interface Database {
           question_id?: string
           seq?: number
           answer_image_url?: string | null
-          yolo_model_id?: string | null
-          yolo_result?: Json | null
-          detected_labels?: string[]
+          detected_labels?: string[] | null
           match_pass?: boolean | null
           score?: number
           feedback?: string | null
           answered_at?: string | null
+          ai_provider?: string
+          ai_model?: string | null
+          ai_result?: Json | null
           created_at?: string
           updated_at?: string
         }
