@@ -240,12 +240,15 @@ function AttemptDetails({ attempt }: { attempt: AttemptWithDetails }) {
             const isCorrect = !!item.match_pass;
             const isAdvanced = q?.question_type === "ADVANCED";
 
-            const exampleUrl =
+            const referenceImageUrl =
               q?.question_type === "COPY"
                 ? q?.prompt_image_url
-                : q?.question_type === "TEXT"
-                ? q?.answer_image_url
-                : null;
+                : q?.answer_image_url;
+            
+            const referenceLabel = 
+              q?.question_type === "COPY" 
+                ? "範例圖：" 
+                : "參考解答圖：";
 
             const ai = item.ai_result as any;
 
@@ -281,10 +284,10 @@ function AttemptDetails({ attempt }: { attempt: AttemptWithDetails }) {
                     {q?.prompt_text && <p className="text-gray-700 mb-3 whitespace-pre-line">{q.prompt_text}</p>}
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
-                      {exampleUrl && (
+                      {referenceImageUrl && (
                         <div>
-                          <p className="text-gray-600 mb-2">{q?.question_type === "COPY" ? "範例圖：" : "正解範例圖："}</p>
-                          <img src={exampleUrl} alt="example" className="rounded border-2 border-gray-300 w-full" />
+                          <p className="text-gray-600 mb-2">{referenceLabel}</p>
+                          <img src={referenceImageUrl} alt="example" className="rounded border-2 border-gray-300 w-full" />
                         </div>
                       )}
 

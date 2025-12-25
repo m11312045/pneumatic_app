@@ -78,12 +78,15 @@ export function Results({ questions, answers, onRestart }: ResultsProps) {
             const isAdvanced = question.question_type === "ADVANCED";
             const ai = answer?.aiResult as any;
 
-            const exampleUrl =
+            const referenceImageUrl =
               question.question_type === "COPY"
                 ? question.prompt_image_url
-                : question.question_type === "TEXT"
-                ? question.answer_image_url
-                : null;
+                : question.answer_image_url;
+            
+            const referenceLabel = 
+              question.question_type === "COPY" 
+                ? "範例圖：" 
+                : "參考解答圖：";
 
             return (
               <div
@@ -121,12 +124,16 @@ export function Results({ questions, answers, onRestart }: ResultsProps) {
                     )}
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
-                      {exampleUrl && (
+                      {referenceImageUrl && (
                         <div>
                           <p className="text-gray-600 mb-2">
-                            {question.question_type === "COPY" ? "範例圖：" : "正解範例圖："}
+                            {referenceLabel}
                           </p>
-                          <img src={exampleUrl} alt="範例/正解" className="rounded border-2 border-gray-300 w-full" />
+                          <img 
+                            src={referenceImageUrl} 
+                            alt="參考圖" 
+                            className="rounded border-2 border-gray-300 w-full" 
+                          />
                         </div>
                       )}
 
