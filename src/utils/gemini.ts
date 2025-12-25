@@ -1,30 +1,20 @@
-// src/utils/gemini.ts
+// src/lib/gemini.ts
 import { supabase } from "../lib/supabase";
 
-export type GeminiAnalysisResult = {
-  isCorrect: boolean;
-  detectedComponents: string[];
-  bonusCorrect?: boolean;
-  logicEquation?: string;
-  advice?: string;
-  ai_model?: string;
-};
-
-export async function analyzeWithGeminiEdge(input: {
+export async function analyzeWithGeminiEdge(body: {
   questionType: "COPY" | "TEXT" | "ADVANCED";
   promptText: string;
-  answerImageUrl?: string;
+  answerImageUrl: string;
   bestAnswerText?: string;
 }) {
   const { data, error } = await supabase.functions.invoke("gemini-analyze", {
-    body: input,
+    body,
   });
 
   if (error) {
-    // @ts-ignore
-    const res: Response | undefined = error.context?.response;
-    if (res) console.error("Edge error body:", await res.text());
+    // supabase-js 會把 response body 放在 error.context?.response
     throw error;
   }
+
   return data;
 }

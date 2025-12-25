@@ -1,348 +1,333 @@
-import { supabase } from './supabase';
-import { User, Question, AttemptWithDetails, AttemptItem } from '../types';
+// src/lib/api.ts
+import { supabase } from "./supabase";
+import type { Answer, Question, AttemptWithDetails, User } from "../types";
+import { analyzeWithGeminiEdge } from "../utils/gemini";
 
-// 學生登入或註冊
-export async function loginOrRegisterStudent(
-  studentNo: string,
-  name: string
-): Promise<User | null> {
-  try {
-    const { data: existing, error: selectError } = await supabase
-      .from("students")
-      .select("*")
-      .eq("student_no", studentNo)
-      .eq("name", name)
-      .maybeSingle(); // ✅ 改這個：查不到不會丟錯
+// ---------- utils ----------
+function safeTrim(v: unknown): string {
+  return String(v ?? "").trim();
+}
 
-    if (selectError) throw selectError;
+function dataUrlToBlob(dataUrl: string): { blob: Blob; ext: string; mime: string } {
+  const m = dataUrl.match(/^data:(.+);base64,(.*)$/);
+  if (!m) throw new Error("Invalid image dataURL");
+  const mime = m[1];
+  const b64 = m[2];
+  const bin = atob(b64);
+  const len = bin.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+  const blob = new Blob([bytes], { type: mime });
 
-    if (existing) {
-      return {
-        id: existing.id,                // uuid
-        studentId: existing.student_no, // 顯示用
-        name: existing.name,
-      };
+  const ext =
+    mime.includes("png") ? "png" :
+    mime.includes("webp") ? "webp" :
+    "jpg";
+
+  return { blob, ext, mime };
+}
+
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function take<T>(arr: T[], n: number): T[] {
+  return arr.slice(0, Math.max(0, n));
+}
+
+function isBasic(q: Question) {
+  return q.question_type === "COPY" || q.question_type === "TEXT";
+}
+function isAdvanced(q: Question) {
+  return q.question_type === "ADVANCED";
+}
+
+/** 新策略：基本3、進階7、difficulty=3 最多3 */
+export function selectQuestionsByStrategy(all: Question[]) {
+  const active = all.filter((q) => q.is_active !== false);
+  const basicPool = active.filter(isBasic);
+  const advPool = active.filter(isAdvanced);
+
+  const basicNeed = 3;
+  const advNeed = 7;
+  const advHardCap = 3;
+
+  const basicPick = take(shuffle(basicPool), basicNeed);
+
+  const advHard = advPool.filter((q) => (q.difficulty ?? 1) === 3);
+  const advNonHard = advPool.filter((q) => (q.difficulty ?? 1) !== 3);
+
+  const advHardPick = take(shuffle(advHard), advHardCap);
+  const advRestPick = take(shuffle(advNonHard), Math.max(0, advNeed - advHardPick.length));
+  const advPick = [...advHardPick, ...advRestPick];
+
+  return {
+    selected: [...basicPick, ...advPick],
+    shortage: {
+      basicHave: basicPool.length,
+      advHave: advPool.length,
+      advHardHave: advHard.length,
+      basicNeed,
+      advNeed,
+      advHardCap,
+      basicPicked: basicPick.length,
+      advPicked: advPick.length,
+    },
+  };
+}
+
+// ---------- auth/student ----------
+export async function loginOrRegisterStudent(studentNo: string, name: string): Promise<User> {
+  const sn = safeTrim(studentNo);
+  const nm = safeTrim(name);
+
+  if (!sn || !nm) throw new Error("請輸入學號與姓名");
+
+  // 先找
+  const { data: found, error: e1 } = await supabase
+    .from("students")
+    .select("*")
+    .eq("student_no", sn)
+    .eq("name", nm)
+    .maybeSingle();
+
+  if (e1) throw e1;
+  if (found) {
+    return { id: found.id, student_no: found.student_no, name: found.name };
+  }
+
+  // 沒找到就建
+  const { data: created, error: e2 } = await supabase
+    .from("students")
+    .insert({ student_no: sn, name: nm })
+    .select("*")
+    .single();
+
+  if (e2) throw e2;
+
+  return { id: created.id, student_no: created.student_no, name: created.name };
+}
+
+// ---------- questions ----------
+export async function getQuestions(): Promise<Question[]> {
+  const { data, error } = await supabase
+    .from("questions")
+    .select("*")
+    .eq("is_active", true)
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []) as any;
+}
+
+// ---------- attempts (created ONLY when finished) ----------
+export async function createAttemptAfterFinished(studentId: string, questions: Question[]) {
+  const copyCount = questions.filter((q) => q.question_type === "COPY").length;
+  const textCount = questions.filter((q) => q.question_type === "TEXT").length;
+  const advancedCount = questions.filter((q) => q.question_type === "ADVANCED").length;
+
+  const { data: attempt, error: e1 } = await supabase
+    .from("attempts")
+    .insert({
+      student_id: studentId,
+      status: "IN_PROGRESS",
+      copy_count: copyCount,
+      text_count: textCount,
+      advanced_count: advancedCount,
+      exam_type: "PRACTICE_PNEUMATIC",
+    })
+    .select("*")
+    .single();
+
+  if (e1) throw e1;
+
+  const items = questions.map((q, idx) => ({
+    attempt_id: attempt.id,
+    question_id: q.id,
+    seq: idx + 1,
+    ai_provider: "GEMINI",
+    ai_model: null,
+  }));
+
+  const { error: e2 } = await supabase.from("attempt_items").insert(items);
+  if (e2) throw e2;
+
+  return attempt.id as string;
+}
+
+export async function submitAttempt(attemptId: string, totalScore: number) {
+  const { error } = await supabase
+    .from("attempts")
+    .update({
+      status: "SUBMITTED",
+      total_score: totalScore,
+      submitted_at: new Date().toISOString(),
+    })
+    .eq("id", attemptId);
+
+  if (error) throw error;
+}
+
+// ---------- storage upload ----------
+async function uploadAnswerImage(attemptId: string, seq: number, imageData: string): Promise<string> {
+  const { blob, ext, mime } = dataUrlToBlob(imageData);
+  const path = `attempts/${attemptId}/${seq}.${ext}`;
+
+  const { error: upErr } = await supabase.storage
+    .from("pneumatic-answers")
+    .upload(path, blob, { contentType: mime, upsert: true });
+
+  if (upErr) throw upErr;
+
+  const { data } = supabase.storage.from("pneumatic-answers").getPublicUrl(path);
+  return data.publicUrl;
+}
+
+// ---------- core: analyze after all answered ----------
+export async function analyzeAllAnswers(args: {
+  studentId: string;
+  questions: Question[];
+  answers: Answer[]; // must include imageData
+  expectedLabels: q.expected_labels,
+}): Promise<{ attemptId: string; analyzedAnswers: Answer[]; totalScore: number }> {
+  const { studentId, questions, answers } = args;
+
+  if (questions.length !== 10) {
+    // 你現在固定 10 題（3+7）
+    // 若未來改題數，這行可拿掉
+    console.warn("Expected 10 questions, got:", questions.length);
+  }
+
+  // 1) 建 attempt（此時才會有紀錄）
+  const attemptId = await createAttemptAfterFinished(studentId, questions);
+
+  // 2) 逐題上傳圖片 + AI 分析 + 回寫 attempt_items
+  const analyzed: Answer[] = [];
+  let total = 0;
+
+  for (let i = 0; i < questions.length; i++) {
+    const q = questions[i];
+    const a = answers.find((x) => x.questionId === q.id);
+
+    if (!a?.imageData) {
+      // 理論上不會發生：你 UI 會強制要有圖才能送出
+      throw new Error(`第 ${i + 1} 題沒有作答圖片`);
     }
 
-    const { data: newStudent, error: insertError } = await supabase
-      .from("students")
-      .insert({ student_no: studentNo, name })
-      .select()
-      .single();
+    // upload image
+    const publicUrl = await uploadAnswerImage(attemptId, i + 1, a.imageData);
 
-    if (insertError) throw insertError;
-
-    return {
-      id: newStudent.id,
-      studentId: newStudent.student_no,
-      name: newStudent.name,
-    };
-  } catch (error) {
-    console.error("登入錯誤:", error);
-    return null;
-  }
-}
-
-// 獲取所有題目
-export async function getQuestions(): Promise<Question[]> {
-  try {
-    const { data, error } = await supabase
-      .from('questions')
-      .select('*')
-      .eq('is_active', true)
-      .order('created_at');
-
-    if (error) throw error;
-
-    return data.map((q) => ({
-      id: q.id,
-      question_type: q.question_type,
-      title: q.title || undefined,
-      prompt_text: q.prompt_text || undefined,
-      prompt_image_url: q.prompt_image_url || undefined,
-      explanation: q.explanation || undefined,
-      expected_labels: q.expected_labels,
-      expected_counts: q.expected_counts as Record<string, number> | undefined,
-      difficulty: q.difficulty,
-      is_active: q.is_active,
-      answer_image_url: q.answer_image_url || undefined,
-    }));
-  } catch (error) {
-    console.error('獲取題目錯誤:', error);
-    return [];
-  }
-}
-
-// 隨機選擇題目
-export function getRandomQuestions(
-  allQuestions: Question[],
-  totalCount: number = 20
-  // copyCount 參數可能不再需要嚴格限制，這裡改寫邏輯
-): Question[] {
-  // 分類
-  const basicQuestions = allQuestions.filter(q => q.question_type === 'COPY' || q.question_type === 'TEXT');
-  const advancedQuestions = allQuestions.filter(q => q.question_type === 'ADVANCED');
-
-  // 1. 抽取 10 題基本題
-  const pickedBasic = [...basicQuestions].sort(() => Math.random() - 0.5).slice(0, 10);
-  
-  // 2. 抽取 10 題進階題
-  const pickedAdvanced = [...advancedQuestions].sort(() => Math.random() - 0.5).slice(0, 10);
-
-  // 合併並打亂
-  const finalQuestions = [...pickedBasic, ...pickedAdvanced].sort(() => Math.random() - 0.5);
-
-  return finalQuestions;
-}
-
-// 建立新的測驗
-export async function createAttempt(
-  studentUuid: string,
-  questions: Question[],
-): Promise<string | null> {
-  try {
-    const copyCount = questions.filter(q => q.question_type === "COPY").length;
-    const textCount = questions.filter(q => q.question_type === "TEXT").length;
-    const advancedCount = questions.filter(q => q.question_type === "ADVANCED").length;
-
-    const { data: attempt, error: attemptError } = await supabase
-      .from("attempts")
-      .insert({
-        student_id: studentUuid,
-        status: "IN_PROGRESS",
-        copy_count: copyCount,
-        text_count: textCount,
-        advanced_count: advancedCount,
-      })
-      .select()
-      .single();
-
-    if (attemptError) throw attemptError;
-
-    const items = questions.map((q, index) => ({
-      attempt_id: attempt.id,
-      question_id: q.id,
-      seq: index + 1,
-      // ✅ 這些欄位若 DB 沒預設，保險給值
-      detected_labels: [],
-      score: 0,
-    }));
-
-    const { error: itemsError } = await supabase.from("attempt_items").insert(items);
-    if (itemsError) throw itemsError;
-
-    return attempt.id;
-  } catch (error) {
-    console.error("建立測驗錯誤:", error);
-    return null;
-  }
-}
-
-
-// 上傳圖片到 Supabase Storage
-export async function uploadAnswerImage(
-  attemptId: string,
-  seq: number,
-  file: File
-): Promise<string> {
-  const filePath = `${attemptId}/q${seq}.jpg`;
-
-  const { error } = await supabase.storage
-    .from("pneumatic-answers")
-    .upload(filePath, file, {
-      contentType: file.type || "image/jpeg",
-      upsert: true,
-      cacheControl: "0", // ✅ 避免重拍後拿到舊快取
+    // call edge
+    const ai = await analyzeWithGeminiEdge({
+      questionType: q.question_type,
+      promptText: q.prompt_text ?? "",
+      answerImageUrl: publicUrl,
+      bestAnswerText: q.question_type === "ADVANCED" ? (q.explanation ?? "") : undefined,
     });
 
-  if (error) {
-    console.error("上傳圖片錯誤:", error);
-    throw error;
-  }
+    // normalize scoring
+    const isCorrect = !!ai?.isCorrect;
+    const detectedLabels =
+      Array.isArray(ai?.detectedComponents) ? ai.detectedComponents.map(String) :
+      Array.isArray(ai?.detectedLabels) ? ai.detectedLabels.map(String) :
+      [];
 
-  const { data: urlData } = supabase.storage
-    .from("pneumatic-answers")
-    .getPublicUrl(filePath);
+    const score = isCorrect ? 10 : 0;
+    total += score;
 
-  // ✅ 強制 bust cache（保險）
-  return `${urlData.publicUrl}?t=${Date.now()}`;
-}
+    // write attempt_items
+    const updatePayload: any = {
+      answer_image_url: publicUrl,
+      match_pass: isCorrect,
+      score,
+      answered_at: new Date().toISOString(),
+      ai_provider: (ai?.ai_provider ?? "gemini").toString().toUpperCase(),
+      ai_model: ai?.ai_model ?? null,
+      ai_result: ai ?? null,
+    };
 
+    // basic: detected_labels
+    if (q.question_type !== "ADVANCED") {
+      updatePayload.detected_labels = detectedLabels;
+      updatePayload.feedback = isCorrect ? null : (q.explanation ?? null);
+    } else {
+      // advanced: put advice into feedback (optional)
+      updatePayload.detected_labels = [];
+      updatePayload.feedback = ai?.advice ? String(ai.advice) : null;
+    }
 
-// 更新答題項目
-export async function updateAttemptItem(
-  attemptId: string,
-  seq: number,
-  data: {
-    answer_image_url: string;
-    detected_labels: string[];
-    match_pass: boolean;
-    score: number;
-    feedback?: string;
-
-    ai_provider?: 'GEMINI';
-    ai_model?: string;
-    ai_result?: any;
-  }
-): Promise<boolean> {
-  try {
-    const { error } = await supabase
+    const { error: upErr } = await supabase
       .from("attempt_items")
-      .update({
-        ...data,
-        answered_at: new Date().toISOString(),
-      })
+      .update(updatePayload)
       .eq("attempt_id", attemptId)
-      .eq("seq", seq);
+      .eq("seq", i + 1);
 
-    if (error) throw error;
-    return true;
-  } catch (error) {
-    console.error("更新答題項目錯誤:", error);
-    return false;
+    if (upErr) throw upErr;
+
+    analyzed.push({
+      questionId: q.id,
+      seq: i + 1,
+      imageData: a.imageData,
+      imageUrl: publicUrl,
+      detectedLabels: updatePayload.detected_labels ?? [],
+      isCorrect,
+      score,
+      aiResult: ai,
+    });
   }
+
+  // 3) submit attempt
+  await submitAttempt(attemptId, total);
+
+  return { attemptId, analyzedAnswers: analyzed, totalScore: total };
 }
 
-// 提交測驗
-export async function submitAttempt(attemptId: string, totalScore: number): Promise<boolean> {
-  try {
-    const { error } = await supabase
-      .from('attempts')
-      .update({
-        status: 'SUBMITTED',
-        total_score: totalScore,
-        submitted_at: new Date().toISOString(),
-      })
-      .eq('id', attemptId);
-
-    if (error) throw error;
-    return true;
-  } catch (error) {
-    console.error('提交測驗錯誤:', error);
-    return false;
-  }
-}
-
-// 獲取測驗詳情
-export async function getAttemptDetails(attemptId: string): Promise<AttemptWithDetails | null> {
-  try {
-    // 獲取 attempt
-    const { data: attempt, error: attemptError } = await supabase
-      .from('attempts')
-      .select(
-        `
-        *,
-        students (
-          id,
-          student_no,
-          name
-        )
+// ---------- history ----------
+export async function getAttemptHistory(limit = 50): Promise<AttemptWithDetails[]> {
+  // attempts + students + attempt_items + questions
+  const { data, error } = await supabase
+    .from("attempts")
+    .select(
       `
+      id, student_id, total_score, started_at, submitted_at, copy_count, text_count, advanced_count,
+      students!attempts_student_id_fkey ( student_no, name ),
+      attempt_items (
+        id, attempt_id, question_id, seq, answer_image_url, detected_labels, match_pass, score, feedback, answered_at,
+        ai_provider, ai_model, ai_result,
+        questions ( id, question_type, title, prompt_text, prompt_image_url, answer_image_url, explanation, expected_labels, difficulty, is_active )
       )
-      .eq('id', attemptId)
-      .single();
+    `
+    )
+    .order("created_at", { ascending: false })
+    .limit(limit);
 
-    if (attemptError) throw attemptError;
+  if (error) throw error;
 
-    // 獲取 items 和 questions
-    const { data: items, error: itemsError } = await supabase
-      .from('attempt_items')
-      .select(
-        `
-        *,
-        questions (*)
-      `
-      )
-      .eq('attempt_id', attemptId)
-      .order('seq');
-
-    if (itemsError) throw itemsError;
-
-    const student = attempt.students as any;
+  return (data ?? []).map((a: any) => {
+    const items = (a.attempt_items ?? [])
+      .map((it: any) => ({
+        ...it,
+        question: it.questions ?? null,
+      }))
+      .sort((x: any, y: any) => (x.seq ?? 0) - (y.seq ?? 0));
 
     return {
-      id: attempt.id,
-      student_id: attempt.student_id,
-      student_name: student.name,
-      student_no: student.student_no,
-      status: attempt.status,
-      copy_count: attempt.copy_count,
-      text_count: attempt.text_count,
-      total_score: attempt.total_score,
-      started_at: attempt.started_at,
-      submitted_at: attempt.submitted_at,
-      questions: items.map((item: any) => ({
-        id: item.questions.id,
-        question_type: item.questions.question_type,
-        title: item.questions.title || undefined,
-        prompt_text: item.questions.prompt_text || undefined,
-        prompt_image_url: item.questions.prompt_image_url || undefined,
-        explanation: item.questions.explanation || undefined,
-        expected_labels: item.questions.expected_labels,
-        expected_counts: item.questions.expected_counts as Record<string, number> | undefined,
-        difficulty: item.questions.difficulty,
-        is_active: item.questions.is_active,
-      })),
-      items: items.map((item: any) => ({
-        id: item.id,
-        attempt_id: item.attempt_id,
-        question_id: item.question_id,
-        question: {
-          id: item.questions.id,
-          question_type: item.questions.question_type,
-          title: item.questions.title || undefined,
-          prompt_text: item.questions.prompt_text || undefined,
-          prompt_image_url: item.questions.prompt_image_url || undefined,
-          explanation: item.questions.explanation || undefined,
-          expected_labels: item.questions.expected_labels,
-          expected_counts: item.questions.expected_counts as Record<string, number> | undefined,
-          difficulty: item.questions.difficulty,
-          is_active: item.questions.is_active,
-        },
-        seq: item.seq,
-        answer_image_url: item.answer_image_url,
-        ai_result: item.geminiResult,
-        detected_labels: item.detected_labels,
-        match_pass: item.match_pass,
-        score: item.score,
-        feedback: item.feedback,
-        answered_at: item.answered_at,
-      })),
-    };
-  } catch (error) {
-    console.error('獲取測驗詳情錯誤:', error);
-    return null;
-  }
-}
-
-// 獲取歷史記錄
-export async function getAttemptHistory(limit: number = 50): Promise<AttemptWithDetails[]> {
-  try {
-    const { data: attempts, error } = await supabase
-      .from('attempts')
-      .select(
-        `
-        *,
-        students (
-          id,
-          student_no,
-          name
-        )
-      `
-      )
-      .eq('status', 'SUBMITTED')
-      .order('submitted_at', { ascending: false })
-      .limit(limit);
-
-    if (error) throw error;
-
-    // 獲取每個 attempt 的詳細資訊
-    const detailsPromises = attempts.map((attempt) => getAttemptDetails(attempt.id));
-    const details = await Promise.all(detailsPromises);
-
-    return details.filter((d) => d !== null) as AttemptWithDetails[];
-  } catch (error) {
-    console.error('獲取歷史記錄錯誤:', error);
-    return [];
-  }
+      id: a.id,
+      student_id: a.student_id,
+      student_no: a.students?.student_no ?? "",
+      student_name: a.students?.name ?? "",
+      total_score: Number(a.total_score ?? 0),
+      started_at: a.started_at,
+      submitted_at: a.submitted_at,
+      copy_count: a.copy_count ?? 0,
+      text_count: a.text_count ?? 0,
+      advanced_count: a.advanced_count ?? 0,
+      items,
+    } as AttemptWithDetails;
+  });
 }

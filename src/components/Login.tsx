@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { User } from '../types';
+import type { User } from '../types';
 import { LogIn, Loader2 } from 'lucide-react';
 import { loginOrRegisterStudent } from '../lib/api';
 
@@ -11,75 +11,76 @@ export function Login({ onLogin }: LoginProps) {
   const [studentId, setStudentId] = useState('');
   const [name, setName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (studentId.trim() && name.trim()) {
-      setIsLoading(true);
-      const user = await loginOrRegisterStudent(studentId.trim(), name.trim());
+    setError(null);
+
+    const sn = studentId.trim();
+    const nm = name.trim();
+
+    if (!sn) {
+      setError('請輸入學號');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const user = await loginOrRegisterStudent(sn, nm);
+      onLogin(user);
+    } catch (err: any) {
+      console.error(err);
+      setError(String(err?.message ?? err));
+    } finally {
       setIsLoading(false);
-      
-      if (user) {
-        onLogin(user);
-      } else {
-        alert('登入失敗，請重試');
-      }
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
-        <div className="text-center mb-8">
+    <div className="min-h-[70vh] flex items-center justify-center px-4">
+      <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8">
+        <div className="text-center mb-6">
           <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-100 rounded-full mb-4">
             <LogIn className="w-8 h-8 text-indigo-600" />
           </div>
-          <h1 className="text-indigo-600 mb-2">氣壓元件識別練習系統</h1>
-          <p className="text-gray-600">請輸入您的資料開始練習</p>
+          <h2 className="text-gray-900 mb-1">登入 / 建立學生資料</h2>
+          <p className="text-gray-600">輸入學號即可開始（無需密碼）</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label htmlFor="studentId" className="block text-gray-700 mb-2">
-              學號
-            </label>
+            <label className="block text-gray-700 mb-1">學號</label>
             <input
-              id="studentId"
-              type="text"
               value={studentId}
               onChange={(e) => setStudentId(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
-              placeholder="請輸入學號"
-              required
-              disabled={isLoading}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              placeholder="例如：B1234567"
+              autoFocus
             />
           </div>
 
           <div>
-            <label htmlFor="name" className="block text-gray-700 mb-2">
-              姓名
-            </label>
+            <label className="block text-gray-700 mb-1">姓名（可不填）</label>
             <input
-              id="name"
-              type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
-              placeholder="請輸入姓名"
-              required
-              disabled={isLoading}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              placeholder="例如：王小明"
             />
           </div>
+
+          {error ? <div className="text-red-600 text-sm">錯誤：{error}</div> : null}
 
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2 disabled:bg-gray-400 disabled:cursor-not-allowed"
+            className="w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
           >
             {isLoading ? (
               <>
                 <Loader2 className="w-5 h-5 animate-spin" />
-                登入中...
+                讀取中...
               </>
             ) : (
               <>
