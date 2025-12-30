@@ -5,6 +5,7 @@ export async function analyzeWithGeminiEdge(body: {
   questionType: "COPY" | "TEXT" | "ADVANCED";
   promptText: string;
   answerImageUrl: string;
+  referenceImageUrl?: string;
   bestAnswerText?: string;
 }) {
   const { data, error } = await supabase.functions.invoke("gemini-analyze", {

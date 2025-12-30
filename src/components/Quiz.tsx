@@ -49,12 +49,11 @@ export function Quiz({ user }: QuizProps) {
     const advMissing = Math.max(0, shortage.advNeed - shortage.advPicked);
     if (basicMissing > 0 || advMissing > 0) {
       alert(
-        `題庫不足以組成「基本3 + 進階7」\n\n` +
+        `題庫不足以組成「基本3 + 進階2」\n\n` +
           `目前題庫：\n` +
           `- 基本(COPY/TEXT)：${shortage.basicHave}（缺 ${basicMissing}）\n` +
           `- 進階(ADVANCED)：${shortage.advHave}（缺 ${advMissing}）\n` +
-          `  - difficulty=3：${shortage.advHardHave}（本次最多取 ${shortage.advHardCap}）\n\n` +
-          `本次實際抽到：${selected.length} 題（基本${shortage.basicPicked} + 進階${shortage.advPicked}）`
+          `本次實際抽到：${selected.length} 題`
       );
     }
 
@@ -79,7 +78,7 @@ export function Quiz({ user }: QuizProps) {
 
     // ✅ 全部答完才：建立 attempt + 上傳 + 分析 + 寫 DB
     setIsLoading(true);
-    setLoadingText("AI 分析中（10題）...");
+    setLoadingText("AI 分析中（5題）...");
 
     try {
       const { attemptId: newAttemptId, analyzedAnswers } = await analyzeAllAnswers({
