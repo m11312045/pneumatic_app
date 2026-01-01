@@ -48,49 +48,14 @@ function isAdvanced(q: Question) {
 }
 
 /** 新策略：基本3、進階7、difficulty=3 最多3 */
-// export function selectQuestionsByStrategy(all: Question[]) {
-//   const active = all.filter((q) => q.is_active !== false);
-//   const basicPool = active.filter(isBasic);
-//   const advPool = active.filter(isAdvanced);
-
-//   const basicNeed = 3;
-//   const advNeed = 7;
-//   const advHardCap = 3;
-
-//   const basicPick = take(shuffle(basicPool), basicNeed);
-
-//   const advHard = advPool.filter((q) => (q.difficulty ?? 1) === 3);
-//   const advNonHard = advPool.filter((q) => (q.difficulty ?? 1) !== 3);
-
-//   const advHardPick = take(shuffle(advHard), advHardCap);
-//   const advRestPick = take(shuffle(advNonHard), Math.max(0, advNeed - advHardPick.length));
-//   const advPick = [...advHardPick, ...advRestPick];
-
-//   return {
-//     selected: [...basicPick, ...advPick],
-//     shortage: {
-//       basicHave: basicPool.length,
-//       advHave: advPool.length,
-//       advHardHave: advHard.length,
-//       basicNeed,
-//       advNeed,
-//       advHardCap,
-//       basicPicked: basicPick.length,
-//       advPicked: advPick.length,
-//     },
-//   };
-// }
-
-/** 修改抽題策略：基本 3、進階 2 */
 export function selectQuestionsByStrategy(all: Question[]) {
   const active = all.filter((q) => q.is_active !== false);
   const basicPool = active.filter(isBasic);
   const advPool = active.filter(isAdvanced);
 
-  // 定義新的題數配額
   const basicNeed = 3;
-  const advNeed = 2;
-  const advHardCap = 1; // 進階題中，難度 3 的最多 1 題
+  const advNeed = 7;
+  const advHardCap = 3;
 
   const basicPick = take(shuffle(basicPool), basicNeed);
 
@@ -228,13 +193,14 @@ export async function analyzeAllAnswers(args: {
   studentId: string;
   questions: Question[];
   answers: Answer[]; // must include imageData
+  expectedLabels: q.expected_labels,
 }): Promise<{ attemptId: string; analyzedAnswers: Answer[]; totalScore: number }> {
   const { studentId, questions, answers } = args;
 
-  if (questions.length !== 5) {
+  if (questions.length !== 10) {
     // 你現在固定 10 題（3+7）
     // 若未來改題數，這行可拿掉
-    console.warn("Expected 5 questions, got:", questions.length);
+    console.warn("Expected 10 questions, got:", questions.length);
   }
 
   // 1) 建 attempt（此時才會有紀錄）
@@ -256,16 +222,11 @@ export async function analyzeAllAnswers(args: {
     // upload image
     const publicUrl = await uploadAnswerImage(attemptId, i + 1, a.imageData);
 
-    const referenceUrl = q.question_type === "COPY" 
-    ? q.prompt_image_url 
-    : q.answer_image_url;
-
     // call edge
     const ai = await analyzeWithGeminiEdge({
       questionType: q.question_type,
       promptText: q.prompt_text ?? "",
       answerImageUrl: publicUrl,
-      referenceImageUrl: referenceUrl || undefined,
       bestAnswerText: q.question_type === "ADVANCED" ? (q.explanation ?? "") : undefined,
     });
 
@@ -276,7 +237,7 @@ export async function analyzeAllAnswers(args: {
       Array.isArray(ai?.detectedLabels) ? ai.detectedLabels.map(String) :
       [];
 
-    const score = isCorrect ? 20 : 0;
+    const score = isCorrect ? 10 : 0;
     total += score;
 
     // write attempt_items

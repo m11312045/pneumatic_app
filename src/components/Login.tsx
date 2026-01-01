@@ -45,7 +45,7 @@ export function Login({ onLogin }: LoginProps) {
             <LogIn className="w-8 h-8 text-indigo-600" />
           </div>
           <h2 className="text-gray-900 mb-1">登入 / 建立學生資料</h2>
-          <p className="text-gray-600">輸入學號與姓名（無需密碼）</p>
+          <p className="text-gray-600">輸入學號即可開始（無需密碼）</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -61,7 +61,7 @@ export function Login({ onLogin }: LoginProps) {
           </div>
 
           <div>
-            <label className="block text-gray-700 mb-1">姓名</label>
+            <label className="block text-gray-700 mb-1">姓名（可不填）</label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
